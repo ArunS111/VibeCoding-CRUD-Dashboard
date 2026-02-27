@@ -1,0 +1,63 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: apex-db
+    environment:
+      POSTGRES_DB: apexdb
+      POSTGRES_USER: ${POSTGRES_USER:-apex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apex}
+    volumes:
+      - apex-db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - apex-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-apex} -d apexdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: apex-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/apexdb
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-apex}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-apex}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - apex-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/inventory/stats || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: apex-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - apex-net
+
+volumes:
+  apex-db-data:
+
+networks:
+  apex-net:
+    driver: bridge
