@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "apex-inventory": {
+      "command": "node",
+      "args": ["mcp-server/index.js"],
+      "env": {
+        "APEX_API_URL": "http://localhost:8080/api"
+      }
+    }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const f=process.env.CLAUDE_TOOL_INPUT_FILE_PATH||'';const ts=new Date().toISOString();const line=`${ts} | MODIFIED | ${f}`;const fs=require('fs');const log='CHANGELOG.md';let existing='';try{existing=fs.readFileSync(log,'utf8')}catch{}if(f&&!existing.includes(line.slice(0,40))){fs.writeFileSync(log,existing?existing+'\\n'+line:line+'\\n')}\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const f=process.env.CLAUDE_TOOL_INPUT_FILE_PATH||'';if(f.match(/\\.(ts|tsx)$/)&&f.includes('/frontend/')){require('child_process').execSync('cd frontend && npx eslint --fix --quiet \\\"'+f+'\\\"',{stdio:'ignore',cwd:process.cwd()})}\""
+          }
+        ]
+      }
+    ]
+  }
+}
