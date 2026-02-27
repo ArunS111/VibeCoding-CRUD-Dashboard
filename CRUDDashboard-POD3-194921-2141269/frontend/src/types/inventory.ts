@@ -26,6 +26,20 @@ export interface ActivityLogEntry {
   timestamp: string;
 }
 
+export type ToastSeverity = 'success' | 'warning' | 'error' | 'info';
+
+export interface Toast {
+  id: string;
+  message: string;
+  severity: ToastSeverity;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
 export interface ItemFormData {
   name: string;
   sku: string;

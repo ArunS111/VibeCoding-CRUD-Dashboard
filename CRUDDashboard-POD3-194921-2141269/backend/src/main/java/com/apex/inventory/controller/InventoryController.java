@@ -5,6 +5,8 @@ import com.apex.inventory.service.InventoryService;
 import jakarta.validation.Valid;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import java.io.*;
 import java.util.List;
 
 @RestController
@@ -57,5 +59,40 @@ public class InventoryController {
     public ResponseEntity<Void> bulkDelete(@RequestBody BulkDeleteRequest request) {
         inventoryService.bulkDelete(request.getIds());
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/export/csv")
+    public ResponseEntity<String> exportCsv(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String category) {
+        List<InventoryItemDTO> items = inventoryService.getAllItems(search, category, "name", "asc");
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw);
+        pw.println("ID,Name,SKU,Category,Price,Quantity,Stock Status,Created At");
+        for (InventoryItemDTO i : items) {
+            pw.printf("%d,\"%s\",\"%s\",\"%s\",%.2f,%d,%s,%s%n",
+                    i.getId(),
+                    escape(i.getName()),
+                    escape(i.getSku()),
+                    escape(i.getCategory()),
+                    i.getPrice(),
+                    i.getQuantity(),
+                    i.getStockStatus(),
+                    i.getCreatedAt());
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/csv"));
+        headers.setContentDisposition(ContentDisposition.attachment().filename("inventory.csv").build());
+        return ResponseEntity.ok().headers(headers).body(sw.toString());
+    }
+
+    @PostMapping("/import/csv")
+    public ResponseEntity<ImportResultDTO> importCsv(@RequestParam("file") MultipartFile file) {
+        ImportResultDTO result = inventoryService.importCsv(file);
+        return ResponseEntity.ok(result);
+    }
+
+    private String escape(String value) {
+        return value == null ? "" : value.replace("\"", "\"\"");
     }
 }

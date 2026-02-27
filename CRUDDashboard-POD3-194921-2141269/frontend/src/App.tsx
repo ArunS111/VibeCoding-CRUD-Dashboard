@@ -1,21 +1,31 @@
-import { useState, useMemo } from 'react';
-import { Plus } from 'lucide-react';
+import { useState, useMemo, useRef } from 'react';
+import { Plus, Download, Upload } from 'lucide-react';
 import { Header } from './components/layout/Header';
 import { StatsBar } from './components/dashboard/StatsBar';
 import { SearchBar } from './components/dashboard/SearchBar';
 import { CategoryChart } from './components/dashboard/CategoryChart';
+import { StockPieChart } from './components/dashboard/StockPieChart';
 import { InventoryTable } from './components/inventory/InventoryTable';
 import { BulkDeleteBar } from './components/inventory/BulkDeleteBar';
 import { ItemModal } from './components/modals/ItemModal';
 import { DeleteConfirmModal } from './components/modals/DeleteConfirmModal';
 import { ActivityLog } from './components/activity/ActivityLog';
 import { Button } from './components/ui/Button';
+import ToastContainer from './components/ui/ToastContainer';
 import { useInventoryStore } from './store/inventoryStore';
+import { useToastStore } from './store/toastStore';
 import {
   useInventory, useStats, useActivityLog,
-  useCreateItem, useUpdateItem, useDeleteItem, useBulkDelete,
+  useCreateItem, useUpdateItem, useDeleteItem, useBulkDelete, useImportCsv,
 } from './hooks/useInventory';
-import type { ItemFormData } from './types/inventory';
+import { inventoryApi } from './services/api';
+import type { ItemFormData, InventoryItem } from './types/inventory';
+
+function stockAlertMessage(item: InventoryItem): string | null {
+  if (item.stockStatus === 'OUT_OF_STOCK') return `"${item.name}" is now OUT OF STOCK`;
+  if (item.stockStatus === 'LOW_STOCK')    return `"${item.name}" is LOW STOCK (${item.quantity} remaining)`;
+  return null;
+}
 
 export default function App() {
   const [search, setSearch] = useState('');
@@ -25,6 +35,8 @@ export default function App() {
   });
 
   const store = useInventoryStore();
+  const toast = useToastStore();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: allItems = [], isLoading } = useInventory();
   const { data: stats } = useStats();
@@ -34,6 +46,7 @@ export default function App() {
   const updateItem = useUpdateItem();
   const deleteItem = useDeleteItem();
   const bulkDelete = useBulkDelete();
+  const importCsv = useImportCsv();
 
   const filteredItems = useMemo(() => {
     const q = search.toLowerCase();
@@ -61,24 +74,45 @@ export default function App() {
   };
 
   const handleSave = async (data: ItemFormData) => {
-    if (store.modalMode === 'create') {
-      await createItem.mutateAsync(data);
-    } else if (store.editingItem) {
-      await updateItem.mutateAsync({ id: store.editingItem.id, data });
+    try {
+      if (store.modalMode === 'create') {
+        const created = await createItem.mutateAsync(data);
+        toast.push(`"${created.name}" added to inventory`, 'success');
+        const alert = stockAlertMessage(created);
+        if (alert) toast.push(alert, created.stockStatus === 'OUT_OF_STOCK' ? 'error' : 'warning');
+      } else if (store.editingItem) {
+        const updated = await updateItem.mutateAsync({ id: store.editingItem.id, data });
+        toast.push(`"${updated.name}" updated`, 'success');
+        const alert = stockAlertMessage(updated);
+        if (alert) toast.push(alert, updated.stockStatus === 'OUT_OF_STOCK' ? 'error' : 'warning');
+      }
+      store.closeModal();
+    } catch {
+      toast.push('Failed to save item. Check for duplicate SKU.', 'error');
     }
-    store.closeModal();
   };
 
   const handleConfirmDelete = async () => {
     if (store.deleteTarget) {
-      await deleteItem.mutateAsync(store.deleteTarget.id);
-      store.closeDeleteConfirm();
+      try {
+        await deleteItem.mutateAsync(store.deleteTarget.id);
+        toast.push(`"${store.deleteTarget.name}" deleted`, 'info');
+        store.closeDeleteConfirm();
+      } catch {
+        toast.push('Failed to delete item.', 'error');
+      }
     }
   };
 
   const handleBulkDelete = async () => {
-    await bulkDelete.mutateAsync([...store.selectedIds]);
-    store.clearSelection();
+    const count = store.selectedIds.size;
+    try {
+      await bulkDelete.mutateAsync([...store.selectedIds]);
+      toast.push(`${count} item${count > 1 ? 's' : ''} deleted`, 'info');
+      store.clearSelection();
+    } catch {
+      toast.push('Bulk delete failed.', 'error');
+    }
   };
 
   const handleSelectAll = () => {
@@ -86,6 +120,25 @@ export default function App() {
       store.clearSelection();
     } else {
       store.selectAll(filteredItems.map((i) => i.id));
+    }
+  };
+
+  const handleExport = () => {
+    inventoryApi.exportCsv({ search: search || undefined });
+    toast.push('CSV export started', 'success');
+  };
+
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const result = await importCsv.mutateAsync(file);
+      toast.push(`Imported ${result.imported} item${result.imported !== 1 ? 's' : ''}${result.skipped ? `, ${result.skipped} skipped` : ''}`, result.skipped > 0 ? 'warning' : 'success');
+    } catch {
+      toast.push('Import failed — check file format.', 'error');
     }
   };
 
@@ -104,9 +157,18 @@ export default function App() {
         {/* Controls */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SearchBar value={search} onChange={setSearch} />
-          <Button onClick={store.openCreateModal}>
-            <Plus size={16} /> Add Item
-          </Button>
+          <div className="flex gap-2">
+            <input ref={fileInputRef} type="file" accept=".csv" className="hidden" onChange={handleImportFile} />
+            <Button variant="ghost" onClick={handleImportClick} disabled={importCsv.isPending}>
+              <Upload size={16} /> {importCsv.isPending ? 'Importing…' : 'Import CSV'}
+            </Button>
+            <Button variant="ghost" onClick={handleExport}>
+              <Download size={16} /> Export CSV
+            </Button>
+            <Button onClick={store.openCreateModal}>
+              <Plus size={16} /> Add Item
+            </Button>
+          </div>
         </div>
 
         {/* Bulk delete bar */}
@@ -132,9 +194,10 @@ export default function App() {
           />
         )}
 
-        {/* Stretch goals row */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Charts + Activity row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <CategoryChart items={allItems} />
+          <StockPieChart items={allItems} />
           <ActivityLog logs={activityLogs} />
         </div>
       </main>
@@ -157,6 +220,8 @@ export default function App() {
           onCancel={store.closeDeleteConfirm}
         />
       )}
+
+      <ToastContainer />
     </div>
   );
 }

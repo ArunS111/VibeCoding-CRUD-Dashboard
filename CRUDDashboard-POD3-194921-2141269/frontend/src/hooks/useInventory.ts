@@ -75,3 +75,15 @@ export function useBulkDelete() {
     },
   });
 }
+
+export function useImportCsv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => inventoryApi.importCsv(file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: INVENTORY_KEY });
+      qc.invalidateQueries({ queryKey: STATS_KEY });
+      qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
+    },
+  });
+}
